@@ -108,3 +108,12 @@ func ExceedEndKey(current, endKey []byte) bool {
 	}
 	return bytes.Compare(current, endKey) >= 0
 }
+
+func PutCFWithTxn(txn *badger.Txn, cf string, key []byte, val []byte) error {
+	return txn.Set(KeyWithCF(cf, key), val)
+}
+
+// DeleteCFWithTxn 在给定 txn 内删除 key
+func DeleteCFWithTxn(txn *badger.Txn, cf string, key []byte) error {
+	return txn.Delete(KeyWithCF(cf, key))
+}

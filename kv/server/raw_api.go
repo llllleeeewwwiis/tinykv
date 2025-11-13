@@ -2,35 +2,80 @@ package server
 
 import (
 	"context"
+
+	"github.com/pingcap-incubator/tinykv/kv/storage"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/kvrpcpb"
 )
 
-// The functions below are Server's Raw API. (implements TinyKvServer).
-// Some helper methods can be found in sever.go in the current directory
+// ------------------ RawGet ------------------
+func (server *Server) RawGet(ctx context.Context, req *kvrpcpb.RawGetRequest) (*kvrpcpb.RawGetResponse, error) {
+	reader, err := server.storage.Reader(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
 
-// RawGet return the corresponding Get response based on RawGetRequest's CF and Key fields
-func (server *Server) RawGet(_ context.Context, req *kvrpcpb.RawGetRequest) (*kvrpcpb.RawGetResponse, error) {
-	// Your Code Here (1).
-	return nil, nil
+	val, err := reader.GetCF(req.Cf, req.Key)
+	if err != nil || val == nil {
+		return &kvrpcpb.RawGetResponse{NotFound: true}, nil
+	}
+	return &kvrpcpb.RawGetResponse{Value: val}, nil
 }
 
-// RawPut puts the target data into storage and returns the corresponding response
-func (server *Server) RawPut(_ context.Context, req *kvrpcpb.RawPutRequest) (*kvrpcpb.RawPutResponse, error) {
-	// Your Code Here (1).
-	// Hint: Consider using Storage.Modify to store data to be modified
-	return nil, nil
+// ------------------ RawPut ------------------
+func (server *Server) RawPut(ctx context.Context, req *kvrpcpb.RawPutRequest) (*kvrpcpb.RawPutResponse, error) {
+	batch := []storage.Modify{
+		{
+			Data: storage.Put{
+				Cf:    req.Cf,
+				Key:   req.Key,
+				Value: req.Value,
+			},
+		},
+	}
+	if err := server.storage.Write(nil, batch); err != nil {
+		return nil, err
+	}
+	return &kvrpcpb.RawPutResponse{}, nil
 }
 
-// RawDelete delete the target data from storage and returns the corresponding response
-func (server *Server) RawDelete(_ context.Context, req *kvrpcpb.RawDeleteRequest) (*kvrpcpb.RawDeleteResponse, error) {
-	// Your Code Here (1).
-	// Hint: Consider using Storage.Modify to store data to be deleted
-	return nil, nil
+// ------------------ RawDelete ------------------
+func (server *Server) RawDelete(ctx context.Context, req *kvrpcpb.RawDeleteRequest) (*kvrpcpb.RawDeleteResponse, error) {
+	batch := []storage.Modify{
+		{
+			Data: storage.Delete{
+				Cf:  req.Cf,
+				Key: req.Key,
+			},
+		},
+	}
+	if err := server.storage.Write(nil, batch); err != nil {
+		return nil, err
+	}
+	return &kvrpcpb.RawDeleteResponse{}, nil
 }
 
-// RawScan scan the data starting from the start key up to limit. and return the corresponding result
-func (server *Server) RawScan(_ context.Context, req *kvrpcpb.RawScanRequest) (*kvrpcpb.RawScanResponse, error) {
-	// Your Code Here (1).
-	// Hint: Consider using reader.IterCF
-	return nil, nil
+// ------------------ RawScan ------------------
+func (server *Server) RawScan(ctx context.Context, req *kvrpcpb.RawScanRequest) (*kvrpcpb.RawScanResponse, error) {
+	reader, err := server.storage.Reader(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	it := reader.IterCF(req.Cf)
+	defer it.Close()
+
+	var kvs []*kvrpcpb.KvPair
+	for it.Seek(req.StartKey); it.Valid() && len(kvs) < int(req.Limit); it.Next() {
+		item := it.Item()
+		key := item.KeyCopy(nil)
+		value, _ := item.ValueCopy(nil)
+		kvs = append(kvs, &kvrpcpb.KvPair{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	return &kvrpcpb.RawScanResponse{Kvs: kvs}, nil
 }
